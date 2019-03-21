@@ -81,7 +81,7 @@ There are two causes that altogether result in the out-of-space error:
         ...
         ...
 
-  Using a text editor I changed the value to 3145728 (3MBytes). This limit is immediately lifted, and now move on to re-partitioning the storage.
+   Using a text editor I changed the value to 3145728 (3MBytes). This limit is immediately lifted, and now move on to re-partitioning the storage.
 
 2. The default partition scheme, already baked into the micro-controller storage, offers only 1280KBytes to uploaded program, and leaves room for OTA capability which I do not need for this exercise:
 
@@ -94,7 +94,7 @@ There are two causes that altogether result in the out-of-space error:
         eeprom,   data, 0x99,    0x290000,0x1000,
         spiffs,   data, spiffs,  0x291000,0x16F000,
 
-  Using a text editor I changed the content to the following that removes OTA capability, allocates 3MBytes of capacity to program partition, leaves 1KBytes to EEPROM and 512KBytes to SPIFFS, and little bit of space unused:
+   Using a text editor I changed the content to the following that removes OTA capability, allocates 3MBytes of capacity to program partition, leaves 1KBytes to EEPROM and 512KBytes to SPIFFS, and little bit of space unused:
 
         (C:\Users\Houzuo Guo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.1\tools\partitions\default.csv)
         # Name,   Type, SubType, Offset,  Size, Flags
@@ -104,4 +104,4 @@ There are two causes that altogether result in the out-of-space error:
         eeprom,   data, 0x99,    0x310000,0x1000,
         spiffs,   data, spiffs,  0x320000,0x80000,
 
-  The new partition scheme will be written into the micro-controller storage automatically upon next successful upload of a program.
+   The new partition scheme will be written into the micro-controller storage automatically upon next successful upload of a program.
