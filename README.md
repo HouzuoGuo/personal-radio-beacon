@@ -24,39 +24,39 @@
 - Arduino plugin vsciot-vscode.vscode-arduino version: 0.2.25 (latest as of 2019-03-21)
 - "settings.json"
 
-    {
-        "arduino.defaultBaudRate": 115200,
-        "arduino.path": "C:\\Program Files (x86)\\Arduino"
-    }
+        {
+            "arduino.defaultBaudRate": 115200,
+            "arduino.path": "C:\\Program Files (x86)\\Arduino"
+        }
 
 - "arduino.json"
 
-    {
-        "board": "esp32:esp32:ttgo-lora32-v1",
-        "configuration": "FlashFreq=80,UploadSpeed=921600,DebugLevel=none",
-        "sketch": "main.ino",
-        "port": "COM4"
-    }
+        {
+            "board": "esp32:esp32:ttgo-lora32-v1",
+            "configuration": "FlashFreq=80,UploadSpeed=921600,DebugLevel=none",
+            "sketch": "main.ino",
+            "port": "COM4"
+        }
 
 - "c_cpp_properties.json"
 
-    {
-        "configurations": [
-            {
-                "name": "Win32",
-                "includePath": [
-                    "C:\\\\Users\\\\Houzuo Guo\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\tools\\\\**",
-                    "C:\\\\Users\\\\Houzuo Guo\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\hardware\\\\esp32\\\\1.0.1\\\\**"
-                ],
-                "forcedInclude": [],
-                "intelliSenseMode": "msvc-x64",
-                "compilerPath": "/usr/bin/gcc",
-                "cStandard": "c11",
-                "cppStandard": "c++17"
-            }
-        ],
-        "version": 4
-    }
+        {
+            "configurations": [
+                {
+                    "name": "Win32",
+                    "includePath": [
+                        "C:\\\\Users\\\\Houzuo Guo\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\tools\\\\**",
+                        "C:\\\\Users\\\\Houzuo Guo\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\hardware\\\\esp32\\\\1.0.1\\\\**"
+                    ],
+                    "forcedInclude": [],
+                    "intelliSenseMode": "msvc-x64",
+                    "compilerPath": "/usr/bin/gcc",
+                    "cStandard": "c11",
+                    "cppStandard": "c++17"
+                }
+            ],
+            "version": 4
+        }
 
 # Install up-to-date esptool for advanced diagnosis
 ESP development tools, as installed via Arduino IDE Boards Manager, already comes with an `esptool.py`. 
@@ -74,34 +74,34 @@ There are two causes that altogether result in the out-of-space error:
 
 1. The definition of the board contains an artificial number that limits maximum program upload size to 1280KBytes:
 
-    (C:\Users\Houzuo Guo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.1\boards.txt)
-    ...
-    ...
-    ttgo-lora32-v1.upload.maximum_size=1310720
-    ...
-    ...
+        (C:\Users\Houzuo Guo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.1\boards.txt)
+        ...
+        ...
+        ttgo-lora32-v1.upload.maximum_size=1310720
+        ...
+        ...
 
   Using a text editor I changed the value to 3145728 (3MBytes). This limit is immediately lifted, and now move on to re-partitioning the storage.
 
 2. The default partition scheme, already baked into the micro-controller storage, offers only 1280KBytes to uploaded program, and leaves room for OTA capability which I do not need for this exercise:
 
-    (C:\Users\Houzuo Guo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.1\tools\partitions\default.csv)
-    # Name,   Type, SubType, Offset,  Size, Flags
-    nvs,      data, nvs,     0x9000,  0x5000,
-    otadata,  data, ota,     0xe000,  0x2000,
-    app0,     app,  ota_0,   0x10000, 0x140000,
-    app1,     app,  ota_1,   0x150000,0x140000,
-    eeprom,   data, 0x99,    0x290000,0x1000,
-    spiffs,   data, spiffs,  0x291000,0x16F000,
+        (C:\Users\Houzuo Guo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.1\tools\partitions\default.csv)
+        # Name,   Type, SubType, Offset,  Size, Flags
+        nvs,      data, nvs,     0x9000,  0x5000,
+        otadata,  data, ota,     0xe000,  0x2000,
+        app0,     app,  ota_0,   0x10000, 0x140000,
+        app1,     app,  ota_1,   0x150000,0x140000,
+        eeprom,   data, 0x99,    0x290000,0x1000,
+        spiffs,   data, spiffs,  0x291000,0x16F000,
 
   Using a text editor I changed the content to the following that removes OTA capability, allocates 3MBytes of capacity to program partition, leaves 1KBytes to EEPROM and 512KBytes to SPIFFS, and little bit of space unused:
 
-    (C:\Users\Houzuo Guo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.1\tools\partitions\default.csv)
-    # Name,   Type, SubType, Offset,  Size, Flags
-    nvs,      data, nvs,     0x9000,  0x5000,
-    otadata,  data, ota,     0xe000,  0x2000,
-    app0,     app,  ota_0,   0x10000, 0x300000,
-    eeprom,   data, 0x99,    0x310000,0x1000,
-    spiffs,   data, spiffs,  0x320000,0x80000,
+        (C:\Users\Houzuo Guo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.1\tools\partitions\default.csv)
+        # Name,   Type, SubType, Offset,  Size, Flags
+        nvs,      data, nvs,     0x9000,  0x5000,
+        otadata,  data, ota,     0xe000,  0x2000,
+        app0,     app,  ota_0,   0x10000, 0x300000,
+        eeprom,   data, 0x99,    0x310000,0x1000,
+        spiffs,   data, spiffs,  0x320000,0x80000,
 
   The new partition scheme will be written into the micro-controller storage automatically upon next successful upload of a program.
