@@ -22,14 +22,14 @@
 # VSCode environment
 - Visual Studio Code version: 1.32.3 (latest as of 2019-03-21)
 - Arduino plugin vsciot-vscode.vscode-arduino version: 0.2.25 (latest as of 2019-03-21)
-- "settings.json"
+- VSCode global settings file "settings.json"
 
         {
             "arduino.defaultBaudRate": 115200,
             "arduino.path": "C:\\Program Files (x86)\\Arduino"
         }
 
-- "arduino.json"
+- ".vscode/arduino.json" inside project repository
 
         {
             "board": "esp32:esp32:ttgo-lora32-v1",
@@ -38,7 +38,7 @@
             "port": "COM4"
         }
 
-- "c_cpp_properties.json"
+- ".vscode/c_cpp_properties.json" inside project repository
 
         {
             "configurations": [
@@ -94,7 +94,7 @@ There are two causes that altogether result in the out-of-space error:
         eeprom,   data, 0x99,    0x290000,0x1000,
         spiffs,   data, spiffs,  0x291000,0x16F000,
 
-   Using a text editor I changed the content to the following that removes OTA capability, allocates 3MBytes of capacity to program partition, leaves 1KBytes to EEPROM and 512KBytes to SPIFFS, and little bit of space unused:
+   Using a text editor I changed the content of "default.csv" to match the "huge_app.cvs" reference that removes OTA capability, allocates 3MBytes of capacity to program partition, leaves 1KBytes to EEPROM and 1MBytes to SPIFFS ():
 
         (C:\Users\Houzuo Guo\AppData\Local\Arduino15\packages\esp32\hardware\esp32\1.0.1\tools\partitions\default.csv)
         # Name,   Type, SubType, Offset,  Size, Flags
@@ -102,6 +102,31 @@ There are two causes that altogether result in the out-of-space error:
         otadata,  data, ota,     0xe000,  0x2000,
         app0,     app,  ota_0,   0x10000, 0x300000,
         eeprom,   data, 0x99,    0x310000,0x1000,
-        spiffs,   data, spiffs,  0x320000,0x80000,
+        spiffs,   data, spiffs,  0x311000,0xEF000,
 
    The new partition scheme will be written into the micro-controller storage automatically upon next successful upload of a program.
+
+# Install software library for programming on-board SSD1306 OLED
+Use Arduino IDE Library Manager to install "ESP8266 and ESP32 Oled Driver for SSD1306 display by Daniel Eichhorn, Fabrice Weinberg Version 4.0.0", the library provides OLED drawing and text displaying capabilities via library header files such as `SSD1306.h` and `OLEDDisplayUi.h`.
+
+An alternative library called "Adafruit_SSD1306" advertises that it too supports this OLED, though I have not experimented with the library and it has got different header file names too.
+
+To help VSCode C++ to introspect the newly installed library and provide auto-completion, edit `.vscode/c_cpp_properties.json` under project repository, and add Arduino IDE library directories into `includePath`:
+
+    {
+        ...
+        "configurations": [
+            {
+                ...
+                "includePath": [
+                    ...
+                    "C:\\\\Users\\\\Houzuo Guo\\\\Documents\\\\Arduino\\\\libraries\\\\**"
+                    ...
+                ],
+                ...
+            }
+        ],
+        ...
+    }
+
+Now with WiFi, Bluetooth, and OLED libraries in the source code, the compiled program uses 1.5MBytes of program partition: "Sketch uses 1501878 bytes (47%) of program storage space. Maximum is 3145728 bytes."
