@@ -4,7 +4,9 @@
             "name": "Win32",
             "includePath": [
                 "C:\\\\Users\\\\Houzuo Guo\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\tools\\\\**",
-                "C:\\\\Users\\\\Houzuo Guo\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\hardware\\\\esp32\\\\1.0.1\\\\**"
+                "C:\\\\Users\\\\Houzuo Guo\\\\AppData\\\\Local\\\\Arduino15\\\\packages\\\\esp32\\\\hardware\\\\esp32\\\\1.0.1\\\\**",
+                "C:\\\\Users\\\\Houzuo Guo\\\\Documents\\\\Arduino\\\\libraries\\\\**",
+                "${workspaceFolder}\\\\**"
             ],
             "forcedInclude": [],
             "intelliSenseMode": "msvc-x64",
