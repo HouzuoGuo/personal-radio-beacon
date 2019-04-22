@@ -13,7 +13,7 @@
 
 // OLED libraries came installed with "ESP8266 and ESP32 Oled Driver for SSD1306 display by Daniel Eichhorn, Fabrice Weinberg Version 4.0.0".
 #include <Wire.h>
-#include <SSD1306.h>
+#include <SSD1306Wire.h>
 #include <OLEDDisplay.h>
 #include <OLEDDisplayFonts.h>
 #include <OLEDDisplayUi.h>
@@ -25,7 +25,7 @@
 // OLED RESET/START pin does not seem to physically exist on the board, though code samples always use the magic number 16.
 #define OLED_PIN_RESET_START 16
 
-SSD1306 oled(OLED_I2C_ADDR, OLED_I2C_SDA, OLED_I2C_SCL);
+SSD1306Wire oled(OLED_I2C_ADDR, OLED_I2C_SDA, OLED_I2C_SCL);
 OLEDDisplayUi oled_ui(&oled);
 
 // oled_redraw redraws the content of the entire OLED.
@@ -33,7 +33,7 @@ void oled_redraw(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t unused
 {
     display->setTextAlignment(TEXT_ALIGN_LEFT);
     display->setFont(ArialMT_Plain_10);
-    display->drawString(0, 0, "hello world");
+    display->drawStringMaxWidth(0, 0, 128, "012345678901234567890123456789012345678901234567890123456789");
 }
 
 FrameCallback oled_only_frame[] = {oled_redraw};
@@ -47,14 +47,19 @@ void oled_setup()
     delay(50);
     digitalWrite(OLED_PIN_RESET_START, HIGH);
 
-    // Initialise user interface
     // Further lowering FPS results in negative "budget milliseconds" in oled_loop, possibly due to bug in OLED library?
     oled_ui.setTargetFPS(10);
-    oled_ui.setIndicatorPosition(BOTTOM);
-    oled_ui.setIndicatorDirection(LEFT_RIGHT);
-    oled_ui.setFrameAnimation(SLIDE_LEFT);
+    // Not going to use automated transition or frame indicators
+    oled_ui.disableAllIndicators();
+    oled_ui.disableAutoTransition();
     oled_ui.setFrames(oled_only_frame, 1);
     oled_ui.init();
+    
+    /*
+    Flip vertically so that display orientation is same as the LoRa antenna on this TTGO T-Beam board.
+    The flip orientation function works only after UI is initialised.
+    */
+    oled.flipScreenVertically();
 }
 
 /*
@@ -108,7 +113,7 @@ int wifi_scan_results_next_index = 0;
 // wifi_scan conducts a fresh round of discovery of nearby WiFi networks.
 void wifi_scan()
 {
-    // WiFi scan has to be conducted in station mode without an active network connection
+    // WiFi scan must be done in station mode without any active connection
     WiFi.disconnect();
     WiFi.mode(WIFI_MODE_STA);
     // Use maximum transmission power
@@ -142,8 +147,10 @@ The access point does not provide network access and chooses a random channel to
 */
 bool wifi_start_access_point(const char *ssid)
 {
+    // WiFi AP advertisement must be done in access point mode without any active connection
     WiFi.disconnect();
     WiFi.mode(WIFI_MODE_AP);
+    // Use maximum transmission power
     WiFi.setTxPower(WIFI_POWER_19_5dBm);
     return WiFi.softAP(ssid, NULL, random(1, 14), 0, 1);
 }
@@ -159,12 +166,16 @@ bool wifi_start_access_point(const char *ssid)
  */
 // Bluetooth LE radio library came installed with Board Manager board "esp32 by Espressif Systems version 1.0.1".
 #include <BLEDevice.h>
+#include <BLEAdvertising.h>
 #include <BLEAdvertisedDevice.h>
-#include <esp_bt.h>
-#include <esp_bt_main.h>
 
 // BT_MAX_DISCOVERED_DEVICES is the maximum number of devices allowed to be discovered during a scan.
 #define BT_MAX_DISCOVERED_DEVICES 100
+/*
+BT_MAX_AD_NAME_LEN is the maximum length of name advertised by bluetooth LE tranceiver while it is made discoverable.
+ESP32 only has a bluetooth LE 4.? tranceiver, its protocol specification only offers up to 29 characters for a device name.
+*/
+#define BT_MAX_AD_NAME_LEN 29
 
 // bt_scan_result is a record of details about a discovered bluetooth device.
 struct bt_scan_result
@@ -174,12 +185,51 @@ struct bt_scan_result
     std::string mac;
 };
 
+// bt_ad advertises the bluetooth tranceiver, making it discoverable to nearby devices.
+BLEAdvertising *bt_ad = NULL;
 // bt_scanner scans for bluetooth devices nearby and decodes their signal strength and manufacturer information.
 BLEScan *bt_scanner = NULL;
 // bt_scan_results is an array of discovered bluetooth devices from the latest round of scan.
 struct bt_scan_result bt_scan_results[BT_MAX_DISCOVERED_DEVICES] = {};
 // bt_scan_result_next_index is the index number of array which the next discovered device will occupy. In between each scan it is reset to 0;
 int bt_scan_results_next_index = 0;
+
+// bt_setup initialises bluetooth tranceiver hardware and library.
+void bt_setup()
+{
+    /*
+    The initialisation name also becomes the default device name during advertisement.
+    The function that turns on advertisement will change the device name later, hence this name does not matter.
+    Advertised device name needs to be changed by manipulating advertisement data record, because BLEDevice::init can be used only once.
+    */
+    BLEDevice::init("HZGL-PRB");
+    bt_scanner = BLEDevice::getScan();
+    bt_ad = BLEDevice::getAdvertising();
+}
+
+// bt_start_advertisement instructs bluetooth tranceiver to make itself discoverable, which will make its name visible to nearby scanners.
+void bt_start_advertisement(std::string name)
+{
+    // Use maximum transmission power
+    BLEDevice::setPower(ESP_PWR_LVL_P9);
+    bt_ad->stop();
+    // Seem good to do...
+    bt_ad->setScanResponse(false);
+    bt_ad->setMinPreferred(0x00);
+    // Allow everyone to discover this tranceiver but no one to connect due to having an empty white-list
+    bt_ad->setScanFilter(false, true);
+    /*
+    Advertise the specified device name.
+    Advertised device name needs to be changed by manipulating advertisement data record, because BLEDevice::init can be used only once.
+    */
+    BLEAdvertisementData ad_data;
+    std::string truncated_name = name;
+    truncated_name.resize(BT_MAX_AD_NAME_LEN);
+    ad_data.setName(truncated_name);
+    bt_ad->setAdvertisementData(ad_data);
+    bt_ad->setScanResponseData(ad_data);
+    bt_ad->start();
+}
 
 // BTDeviceDiscoveryCallBack stores the next discovered device in the result array.
 class BTDeviceDiscoveryCallBack : public BLEAdvertisedDeviceCallbacks
@@ -199,18 +249,11 @@ class BTDeviceDiscoveryCallBack : public BLEAdvertisedDeviceCallbacks
     }
 };
 
-// bt_setup initialises bluetooth LE hardware and driver.
-void bt_setup()
-{
-    BLEDevice::init("HZGL-PRB");
-}
-
 // bt_scan conducts a fresh round of discovery of nearby bluetooth devices.
 void bt_scan(int max_duration_sec)
 {
     // Use maximum transmission power
     BLEDevice::setPower(ESP_PWR_LVL_P9);
-    bt_scanner = BLEDevice::getScan();
     bt_scanner->setAdvertisedDeviceCallbacks(new BTDeviceDiscoveryCallBack());
     bt_scanner->setActiveScan(true);
     // 100 and 99 seem like magic borrowed from examples, I need to develop a better understanding of these two numbers.
@@ -219,23 +262,6 @@ void bt_scan(int max_duration_sec)
     // Reset storage index to 0 and let newly discovered devices fill the array up one by one
     bt_scan_results_next_index = 0;
     BLEScanResults scan_results = bt_scanner->start(max_duration_sec, false);
-    bt_scanner->clearResults();
-}
-
-/*
-bt_start_advertising instructs bluetooth LE tranceiver to work as a server, which will boradcast its device name to nearby bluetooth LE scanners.
-The server does not provide network access.
-*/
-void bt_start_advertising(std::string name)
-{
-    // Use maximum transmission power
-    BLEDevice::setPower(ESP_PWR_LVL_P9);
-    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-    pAdvertising->setScanResponse(false);
-    pAdvertising->setMinPreferred(0x06); // functions that help with iPhone connections issue
-    pAdvertising->setMinPreferred(0x12);
-    BLEDevice::startAdvertising();
 }
 
 #include <esp_gap_ble_api.h>
@@ -244,55 +270,7 @@ void bt_start_advertising(std::string name)
 #include "esp_gap_bt_api.h"
 #include "esp_bt_device.h"
 #include "esp_spp_api.h"
-
-
-void aaaa(esp_spp_cb_event_t event, esp_spp_cb_param_t* param);
-void aaaa(esp_spp_cb_event_t event, esp_spp_cb_param_t* param) {
-
-}
-
-void bt_advertise2()
-{
-    esp_ble_adv_params_t m_advParams;
-
-    m_advParams.adv_int_min = 0x20;
-    m_advParams.adv_int_max = 0x40;
-    m_advParams.adv_type = ADV_TYPE_IND;
-    m_advParams.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
-    m_advParams.channel_map = ADV_CHNL_ALL;
-    m_advParams.adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY;
-    m_advParams.peer_addr_type = BLE_ADDR_TYPE_PUBLIC;
-
-    btStart();
-    esp_bluedroid_init();
-    esp_bluedroid_enable();
-    esp_spp_register_callback(aaaa);
-    esp_spp_init(ESP_SPP_MODE_CB);
-    esp_bt_dev_set_device_name("Name1");
-    // the default BTA_DM_COD_LOUDSPEAKER does not work with the macOS BT stack
-    esp_bt_cod_t cod;
-    cod.major = 0b00001;
-    cod.minor = 0b000100;
-    cod.service = 0b00000010110;
-    esp_bt_gap_set_cod(cod, ESP_BT_INIT_COD);
-    Serial.printf("start advertising 1 : %d\n", esp_ble_gap_start_advertising(&m_advParams));
-    delay(10 * 1000);
-
-    // esp_spp_deinit();
-    esp_bluedroid_disable();
-    // esp_bluedroid_deinit();
-    btStop();
-
-    delay(1 * 1000);
-    btStart();
-    // esp_bluedroid_init();
-    esp_bluedroid_enable();
-    // esp_spp_register_callback(aaaa);
-    // esp_spp_init(ESP_SPP_MODE_CB);
-    esp_bt_dev_set_device_name("Name2");
-    esp_bt_gap_set_cod(cod, ESP_BT_INIT_COD);
-    Serial.printf("start advertising 2: %d\n", esp_ble_gap_start_advertising(&m_advParams));
-}
+#include "BluetoothSerial.h"
 
 /***
  *    ██╗      ██████╗ ██████╗  █████╗ 
@@ -355,31 +333,53 @@ void setup()
     randomSeed(rand_seed);
 
     oled_setup();
-    // bt_setup();
-    bt_advertise2();
+    bt_setup();
     lora_setup();
-
-    // wifi_start_access_point("test1234");
-    bt_start_advertising("FIXME");
 }
 
-void scan_loop(int _)
+char name[20];
+
+int turn = 0;
+void each_turn(int _)
 {
-    wifi_scan();
-    bt_scan(5);
-    Serial.println("WiFi scan result:");
-    for (int i = 0; i < wifi_scan_results_next_index; ++i)
+    turn++;
+    sprintf(name, "HZGL-PRB-%d", turn);
+    switch (turn % 5)
     {
-        Serial.printf("%d - %s - %s\r\n", wifi_scan_results[i].rssi, wifi_scan_results[i].mac.c_str(), wifi_scan_results[i].ssid.c_str());
-    }
-    Serial.println("BT scan result:");
-    for (int i = 0; i < bt_scan_results_next_index; ++i)
-    {
-        Serial.printf("%d - %s - %s\r\n", bt_scan_results[i].rssi, bt_scan_results[i].mac.c_str(), bt_scan_results[i].name.c_str());
+    case 0:
+        Serial.println("WiFi advertisement");
+        wifi_start_access_point(name);
+        delay(5 * 1000);
+        break;
+    case 1:
+        Serial.println("Bluetooth advertisement");
+        bt_start_advertisement(std::string(name));
+        delay(5 * 1000);
+        break;
+    case 2:
+        Serial.println("WiFi scan");
+        wifi_scan();
+        Serial.println("WiFi scan result:");
+        for (int i = 0; i < wifi_scan_results_next_index; ++i)
+        {
+            Serial.printf("%d - %s - %s\r\n", wifi_scan_results[i].rssi, wifi_scan_results[i].mac.c_str(), wifi_scan_results[i].ssid.c_str());
+        }
+        break;
+    case 3:
+        Serial.println("Bluetooth scan");
+        bt_scan(5);
+        Serial.println("BT scan result:");
+        for (int i = 0; i < bt_scan_results_next_index; ++i)
+        {
+            Serial.printf("%d - %s - %s\r\n", bt_scan_results[i].rssi, bt_scan_results[i].mac.c_str(), bt_scan_results[i].name.c_str());
+        }
+        break;
+    case 4:
+        break;
     }
 }
 
 void loop()
 {
-    oled_loop(scan_loop);
+    oled_loop(each_turn);
 }
