@@ -27,19 +27,17 @@
 #define OLED_I2C_SDA 21
 // OLED RESET/START pin does not seem to physically exist on the board, though code samples always use the magic number 16.
 #define OLED_PIN_RESET_START 16
+// OLED_MAX_LINE_LEN is the maximum text length that the on-board OLED can display on a single line using font ArialMT_Plain_10.
+#define OLED_MAX_LINE_LEN 15
+// OLED_FONT_HEIGHT_PX is the height of a line of text displayed on the on-board OLED using font ArialMT_Plain_10.
+#define OLED_FONT_HEIGHT_PX 10
 
 SSD1306Wire oled(OLED_I2C_ADDR, OLED_I2C_SDA, OLED_I2C_SCL);
 OLEDDisplayUi oled_ui(&oled);
 
-// oled_redraw redraws the content of the entire OLED.
-void oled_redraw(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t unused_x, int16_t unused_y)
-{
-    display->setTextAlignment(TEXT_ALIGN_LEFT);
-    display->setFont(ArialMT_Plain_10);
-    display->drawStringMaxWidth(0, 0, 128, "012345678901234567890123456789012345678901234567890123456789");
-}
+void beacon_draw_oled(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t unused_x, int16_t unused_y);
 
-FrameCallback oled_only_frame[] = {oled_redraw};
+FrameCallback oled_only_frame[] = {beacon_draw_oled};
 
 // oled_setup resets and initialises OLED hardware and its user interface library.
 void oled_setup()
@@ -342,8 +340,8 @@ void lora_send(int freq, const char *data)
 {
     LoRa.begin(freq);
     LoRa.setTxPower(20);
-    LoRa.setSpreadingFactor(10);
-    LoRa.setSignalBandwidth(125000);
+    LoRa.setSpreadingFactor(LORA_SPREADING_FACTOR);
+    LoRa.setSignalBandwidth(LORA_BANDWIDTH_HZ);
     LoRa.beginPacket();
     LoRa.print(data);
     LoRa.endPacket();
@@ -391,6 +389,116 @@ struct lora_receive_ret lora_receive(long freq_hz, int timeout_sec)
     return received_nothing;
 }
 
+/*
+██████╗ ███████╗ █████╗  ██████╗ ██████╗ ███╗   ██╗
+██╔══██╗██╔════╝██╔══██╗██╔════╝██╔═══██╗████╗  ██║
+██████╔╝█████╗  ███████║██║     ██║   ██║██╔██╗ ██║
+██╔══██╗██╔══╝  ██╔══██║██║     ██║   ██║██║╚██╗██║
+██████╔╝███████╗██║  ██║╚██████╗╚██████╔╝██║ ╚████║
+╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝
+*/
+
+// BEACON_TEXT_PREFIX is a short string prefixed to transmitted beacon text. It gives a good indication of the beacon nature of the transmission.
+#define BEACON_TEXT_PREFIX "HZGLRB-"
+// BEACON_CUSTOM_DATA is a short string to appear toward end of transmitted beacon text. It should give a clue of who the beacon operator is.
+#define BEACON_CUSTOM_DATA "Houzuo Guo"
+// BEACON_TEXT_MAX_LEN is the maximum length of text that can be transmitted by radios. Among all radios bluetooth has the heaviest length restriction (BT 29 vs WiFi 32).
+#define BEACON_TEXT_MAX_LEN BT_MAX_AD_NAME_LEN
+
+// beacon_text is the latest text to advertise over all radios.
+char beacon_text[BEACON_TEXT_MAX_LEN];
+// beacon_tick_number is the serial number of the TX or RX action since the microcontroller was powered on. In beacon text, the number appears to indicate age of the beacon.
+int beacon_tick_number = 0;
+
+// get_latest_beacon_text updates the beacon text with the latest calculated value and returns it.
+char *beacon_get_text()
+{
+    sprintf(beacon_text, "%s%d-%s", BEACON_TEXT_PREFIX, beacon_tick_number, BEACON_CUSTOM_DATA);
+    return beacon_text;
+}
+
+// beacon_draw_oled redraws the content of the entire OLED to display the status of the upcoming TX or RX action.
+void beacon_draw_oled(OLEDDisplay *display, OLEDDisplayUiState *state, int16_t unused_x, int16_t unused_y)
+{
+    display->clear();
+    display->setTextAlignment(TEXT_ALIGN_LEFT);
+    display->setFont(ArialMT_Plain_10);
+    // Advance to the next tick after this OLED frame
+    ++beacon_tick_number;
+    // Draw the upcoming action on the first line
+    switch (beacon_tick_number % 6)
+    {
+    case 0:
+        display->drawString(0, 0, "WiFi TX...");
+        break;
+    case 1:
+        display->drawString(0, 0, "WiFi RX...");
+        break;
+    case 2:
+        display->drawString(0, 0, "Bluetooth TX...");
+        break;
+    case 3:
+        display->drawString(0, 0, "Bluetooth RX...");
+        break;
+    case 4:
+        display->drawString(0, 0, "LoRa TX...");
+        break;
+    case 5:
+        display->drawString(0, 0, "LoRa RX...");
+        break;
+    }
+    // Draw beacon text on the second line. The beacon text cannot possily exceed two lines long, 200 pixels long should be sufficient to cover both lines.
+    display->drawStringMaxWidth(0, 1 * OLED_FONT_HEIGHT_PX, 200, beacon_get_text());
+    display->display();
+}
+
+// beacon_this_tick manipulates radios to transmit or receive beacon data for the current tick.
+void beacon_this_tick(int _)
+{
+    struct lora_receive_ret lora_recv;
+    switch (beacon_tick_number % 6)
+    {
+    case 0:
+        Serial.println("WiFi TX");
+        wifi_start_access_point(beacon_get_text());
+        delay(5 * 1000);
+        break;
+    case 1:
+        Serial.println("WiFi RX");
+        wifi_scan();
+        Serial.println("WiFi scan result:");
+        for (int i = 0; i < wifi_scan_results_next_index; ++i)
+        {
+            Serial.printf("%d - %s - %s\r\n", wifi_scan_results[i].rssi, wifi_scan_results[i].mac.c_str(), wifi_scan_results[i].ssid.c_str());
+        }
+        break;
+    case 2:
+        Serial.println("Bluetooth TX");
+        bt_start_advertisement(std::string(beacon_get_text()));
+        delay(5 * 1000);
+        break;
+    case 3:
+        Serial.println("Bluetooth RX");
+        bt_scan(5);
+        Serial.println("BT scan result:");
+        for (int i = 0; i < bt_scan_results_next_index; ++i)
+        {
+            Serial.printf("%d - %s - %s\r\n", bt_scan_results[i].rssi, bt_scan_results[i].mac.c_str(), bt_scan_results[i].name.c_str());
+        }
+        break;
+    case 4:
+        Serial.println("LoRa TX");
+        lora_send(LORA_866_CHAN[0], beacon_get_text());
+        break;
+    case 5:
+        Serial.println("LoRa RX");
+        lora_recv = lora_receive(LORA_866_CHAN[0], 5);
+        Serial.println("LoRa receive result:");
+        Serial.printf("%s - %d\n", lora_recv.data.c_str(), lora_recv.rssi);
+        break;
+    }
+}
+
 /***
  *    ███╗   ███╗ █████╗ ██╗███╗   ██╗
  *    ████╗ ████║██╔══██╗██║████╗  ██║
@@ -419,58 +527,7 @@ void setup()
     lora_setup();
 }
 
-char name[20];
-
-int turn = 0;
-void each_turn(int _)
-{
-    turn++;
-    sprintf(name, "%d-http://hz.gl", turn);
-    struct lora_receive_ret lora_recv;
-    switch (turn % 6)
-    {
-    case 0:
-        Serial.println("WiFi advertisement");
-        wifi_start_access_point(name);
-        delay(5 * 1000);
-        break;
-    case 1:
-        Serial.println("Bluetooth advertisement");
-        bt_start_advertisement(std::string(name));
-        delay(5 * 1000);
-        break;
-    case 2:
-        Serial.println("WiFi scan");
-        wifi_scan();
-        Serial.println("WiFi scan result:");
-        for (int i = 0; i < wifi_scan_results_next_index; ++i)
-        {
-            Serial.printf("%d - %s - %s\r\n", wifi_scan_results[i].rssi, wifi_scan_results[i].mac.c_str(), wifi_scan_results[i].ssid.c_str());
-        }
-        break;
-    case 3:
-        Serial.println("Bluetooth scan");
-        bt_scan(5);
-        Serial.println("BT scan result:");
-        for (int i = 0; i < bt_scan_results_next_index; ++i)
-        {
-            Serial.printf("%d - %s - %s\r\n", bt_scan_results[i].rssi, bt_scan_results[i].mac.c_str(), bt_scan_results[i].name.c_str());
-        }
-        break;
-    case 4:
-        Serial.println("LoRa receive");
-        lora_recv = lora_receive(LORA_866_CHAN[0], 5);
-        Serial.println("LoRa receive result:");
-        Serial.printf("%s - %d\n", lora_recv.data.c_str(), lora_recv.rssi);
-        break;
-    case 5:
-        Serial.println("LoRa send");
-        lora_send(LORA_866_CHAN[0], name);
-        break;
-    }
-}
-
 void loop()
 {
-    oled_loop(each_turn);
+    oled_loop(beacon_this_tick);
 }
